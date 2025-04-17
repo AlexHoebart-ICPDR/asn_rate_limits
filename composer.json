@@ -1,0 +1,10 @@
+{
+  "name": "backdrop/GeoIP2-php",
+  "description": "PHP API for GeoIP2 webservice client and database reader.",
+  "type": "backdrop-module",
+  "homepage": "https://github.com/maxmind/GeoIP2-php",
+  "require": {
+    "geoip2/geoip2": "~2.0"
+  }
+}
+

@@ -1,0 +1,9 @@
+.asn_rate_limits td {
+  vertical-align: top;
+}
+.asn_rate_limits .belowlimit {
+  background-color: lightgreen;
+}
+.asn_rate_limits .abovelimit {
+  background-color: lightcoral;
+}

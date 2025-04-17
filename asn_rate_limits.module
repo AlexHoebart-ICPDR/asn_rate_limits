@@ -1,0 +1,315 @@
+<?php
+/**
+ * @file asn_rate_limits.module
+ */
+
+/**
+ * Implements hook_menu().
+ *
+ */
+function asn_rate_limits_menu() {
+  $items = array();
+
+  $items['admin/config/people/asn_rate_limits'] = array(
+    'type' => MENU_NORMAL_ITEM,
+    'title' => 'ASN Rate Limits',
+    'description' => 'Manage ASN rate limits.',
+    'page callback' => 'asn_rate_limits_page',
+    'access arguments' => array('antiscan settings'),
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_cron().
+ *
+ */
+function asn_rate_limits_cron() {
+  $result = asn_rate_limits_check();
+
+  if ($result['ips_blocked'] > 0) {
+
+    $config = config('system.core');
+    $to = $config->get('site_mail');
+    $language = $config->get('language_default');
+    $params['subject'] = t('ASN blocked on site !site_name', array('!site_name' => $config->get('site_name')));
+    $params['body'] = t("There are !ips_blocked new IPs blocked from ASNs !asns.\n\n", array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
+    #$params['body'].= print_r($result['asns'], true);
+    $server_load = asn_rate_limits_server_load();
+    $params['body'].= 'Current server load: ' . $server_load['display'];
+    backdrop_mail('asn_rate_limits', 'cron', $to, $language, $params);
+  }
+}
+
+/**
+ * Implements hook_mail().
+ *
+ */
+function asn_rate_limits_mail($key, &$message, $params) {
+  switch($key) {
+    case 'cron':
+      $message['subject'] = $params['subject'];
+      $message['body'][] = $params['body'];
+      break;
+  }
+}
+
+/**
+ * Display a report about current site usage by ASN.
+ *
+ */
+function asn_rate_limits_page() {
+  $time_window = '30 minutes';
+  $distinct_ips_limit = 20;
+  $hit_limit = 100;
+  $time_limit_sec = 60;
+  $server_load_limit = 3;
+  $asns_blocked = state_get('asn_rate_limits');
+
+  backdrop_add_css(backdrop_get_path('module', 'asn_rate_limits') . '/css/asn_rate_limits.admin.css', array('type' => 'file'));
+  if ($result = asn_rate_limits_check($time_window, $distinct_ips_limit, $hit_limit, $time_limit_sec, $server_load_limit)) {
+    $asns_sort_column  = array_column($result['asns'], 'timer');
+    array_multisort($asns_sort_column, SORT_DESC, $result['asns']);
+
+    $header = array('ASN', 'Organization',
+      array('data' => 'Time/ASN', 'title' => 'Total time per ANS in seconds'),
+      'Hits/ASN', 'IPs', 'IP', 'Time/IP', 'Hits/IP', 'Last time', 'Last path', 'Blocked', 'Operation');
+    $rows = array();
+    foreach ($result['asns'] as $as => $asn) {
+      $row = array();
+      $row[] = array('data' => $as, 'rowspan' => count($asn['ips']), 'class' => array(in_array($as, $asns_blocked) ? 'abovelimit' : ''));
+      $row[] = array('data' => $asn['organization'], 'rowspan' => count($asn['ips']));
+#      $log_link = l($asn['hits'], 'admin/reports/accesslog', array('query' => array('hostname' => implode('|', array_keys($asn['ips'])))));
+      $log_link = l($asn['hits'], 'admin/reports/accesslog/' . implode('+', array_keys($asn['ips'])));
+      $row[] = array('data' => $asn['timer']/1000, 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array(($asn['timer']/1000 > $time_limit_sec) ? 'abovelimit' : 'belowlimit'));
+      $row[] = array('data' => $log_link, 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array(($asn['hits'] > $hit_limit) ? 'abovelimit' : 'belowlimit'));
+      $row[] = array('data' => count($asn['ips']), 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array((count($asn['ips']) > $distinct_ips_limit) ? 'abovelimit' : 'belowlimit'));
+#      $ips_sort_column  = array_column($asn['ips'], 'blocked');
+      $ips_sort_column  = array_column($asn['ips'], 'timer');
+      array_multisort($ips_sort_column, SORT_DESC, $asn['ips']);
+      foreach ($asn['ips'] as $ip => $ip_row) {
+        $row[] = $ip;
+        $row[] = array('data' => $ip_row['timer']/1000, 'align' => 'right', 'class' => array(($ip_row['timer']/1000 > $time_limit_sec) ? 'abovelimit' : 'belowlimit'));
+        $log_link = l($ip_row['hits'], 'admin/reports/accesslog/' . $ip);
+        $row[] = array('data' => $log_link, 'align' => 'right', 'class' => array(($ip_row['hits'] > $hit_limit) ? 'abovelimit' : 'belowlimit'));
+        $row[] = format_date($ip_row['timestamp'], 'custom', 'H:i');
+        $row[] = truncate_utf8($ip_row['path'], 30, TRUE, TRUE);
+        // Print "no", "now" or date when IP was blocked
+        $row[] = !$ip_row['blocked'] ? 'no' : (is_numeric($ip_row['blocked']) ? format_date($ip_row['blocked'], 'short') : $ip_row['blocked']);
+        $row[] = l('check', 'https://www.abuseipdb.com/check/' . $ip, array('external' => TRUE, 'attributes' => array('target' => '_blank')));
+        $rows[] = $row;
+        $row = array();
+      }
+    }
+
+    if ($result['ips_blocked'] > 0) {
+      backdrop_set_message('There are !ips_blocked new IPs blocked from ASNS !asns', array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
+    }
+
+    $build['limits'] = array('#markup' => "<p>Defined usage limits within $time_window: $time_limit_sec seconds CPU time and $hit_limit hits, and $distinct_ips_limit IPs for ASNs. </p>");
+    $build['blocked'] = array('#markup' => "<p>Currently blocked ASN(s): " . ($asns_blocked ? implode(', ', $asns_blocked) : 'none') . "</p>");
+    $server_load = asn_rate_limits_server_load($server_load_limit);
+    $build['load'] = array('#markup' => '<p class="asn_rate_limits">Current server load: ' . $server_load['display'] . '</p>');
+    $build['info'] = array('#markup' => '<p>The table below shows a summary of the access log in the last ' . $time_window . ', grouped by ASN (autonomous system number) and IP, sorted by total time used.</p>');
+    $build['table'] = array('#theme' => 'table', '#header' => $header, '#rows' => $rows, '#attributes' => array('class' => array('asn_rate_limits')));
+    return $build;
+  } else {
+    return "Could not check ASNs, please review module setup.";
+  }
+}
+
+/**
+ * Check current site usage by ASN.
+ *
+ */
+function asn_rate_limits_check($time_window = '30 minutes', $distinct_ips_limit = 20, $hit_limit = 100, $time_limit_sec = 60, $server_load_limit = 3) {
+
+  $interval_start = strtotime('- ' . $time_window);
+  $time_limit = $time_limit_sec * 1000;
+  $asns = array();
+  $ips_blocked = 0;
+  $asns_blocked = array();
+
+  $db_path = backdrop_realpath('public://geoip/GeoLite2-ASN.mmdb');
+  if (!$db_path) {
+    backdrop_set_message('GeoLite2-ASN.mmdb not available at public://geoip/', 'error');
+    return FALSE;
+  }
+
+  if (class_exists('\GeoIp2\Database\Reader')) {
+    $AsnDbReader = new \GeoIp2\Database\Reader($db_path);
+
+    // Check Accesslog records
+    $result = db_select('accesslog', 'a')
+      ->fields('a', array('aid', 'hostname', 'timer', 'timestamp', 'path'))
+      ->condition('uid', 0)
+      ->condition('timestamp', $interval_start, '>=')
+      ->orderBy('aid', 'ASC')
+      ->execute();
+    if ($result) {
+      while ($row = $result->fetchObject()) {
+
+        try {
+          $asn_record = $AsnDbReader->asn($row->hostname);
+        } catch (Exception $e) {
+          backdrop_set_message('AsnDbReader exception: ' . $e->getMessage(), 'error', FALSE);
+          continue;
+        }
+
+        $asn = 'AS' . $asn_record->autonomousSystemNumber;
+        if (!isset($asns[$asn])) {
+          $asns[$asn] = array(
+            'asn' => $asn_record->autonomousSystemNumber,
+            'organization' => $asn_record->autonomousSystemOrganization,
+            'hits' => 1,
+            'timer' => $row->timer,
+            'ips' => array(
+              $row->hostname => array(
+                'hits' => 1,
+                'timestamp' => $row->timestamp,
+                'timer' => $row->timer,
+                'path' => $row->path,
+                'blocked' => asn_rate_limits_ip_is_blocked($row->hostname)
+              )
+            ),
+          );
+        }
+        else {
+          $asns[$asn]['timer']+= $row->timer;
+          $asns[$asn]['hits']++;
+          if (!isset($asns[$asn]['ips'][$row->hostname])) {
+            $asns[$asn]['ips'][$row->hostname] = array(
+              'hits' => 1,
+              'timestamp' => $row->timestamp,
+              'timer' => $row->timer,
+              'path' => $row->path,
+              'blocked' => asn_rate_limits_ip_is_blocked($row->hostname)
+            );
+          }
+          else {
+            $asns[$asn]['ips'][$row->hostname]['hits']++;
+            $asns[$asn]['ips'][$row->hostname]['timestamp'] = $row->timestamp;
+            $asns[$asn]['ips'][$row->hostname]['timer']+= $row->timer;
+            $asns[$asn]['ips'][$row->hostname]['path'] = $row->path;
+          }
+        }
+        #$last_row = $row;
+      }
+    }
+
+    // Check server load increase and above limit
+    $server_load = asn_rate_limits_server_load($server_load_limit);
+
+/*
+$test_asn = 'AS45899';
+$test_ip = '14.191.27.43';
+$test = $asns[$test_asn];
+$test['count'] = count($test['ips']);
+dsm($test['ips'][$test_ip]);
+unset($test['ips']);
+dsm($test);
+dsm("Limits: $hit_limit hits, $time_limit ms, $distinct_ips_limit IPs.");
+*/
+    // Analyse summary and block if needed
+    if ($server_load['critical']) {
+      foreach ($asns as $asn => $asn_record) {
+        // Check IPs and block if exceeding limits
+        foreach ($asn_record['ips'] as $ip => $ip_record) {
+          $block_ip_reason = FALSE;
+          if (!$ip_record['blocked']) {
+            // Exceeding limits on IP level?
+            if ($ip_record['hits'] > $hit_limit && $ip_record['timer'] > $time_limit) {
+              $block_ip_reason = "IP exceeds $hit_limit hits or $time_limit seconds.";
+            }
+            // Exceeding limits on ASN level?
+            if ($asn_record['hits'] > $hit_limit && $asn_record['timer'] > $time_limit && count($asn_record['ips']) > $distinct_ips_limit) {
+              $block_ip_reason = "Part of ASN $asn with more than $hit_limit hits or $time_limit seconds.";
+              $asns_blocked[$asn] = $asn;
+            }
+            // Block if exceeding any limits and not already blocked
+            if ($block_ip_reason) {
+              ip_blocking_block_ip($ip, $block_ip_reason, 'asn');
+              $asns[$asn]['ips'][$ip]['blocked'] = 'now';
+              $ips_blocked++;
+              watchdog('asn_rate_limits', "Blocked IP $ip");
+            }
+          }
+        }
+      }
+    }
+    $result = array('asns' => $asns, 'ips_blocked' => $ips_blocked, 'asns_blocked' => $asns_blocked);
+    return $result;
+  }
+  else {
+    backdrop_set_message('Maxmind Database Reader not installed', 'error');
+    return FALSE;
+  }
+
+  // Remember currently blocked ASN
+  state_set('asn_rate_limits', array_keys($asns_blocked));
+}
+
+/**
+ * Checks server load against limit.
+ *
+ * @param $server_load_limit Limit against which to check.
+ *
+ * @return array see key 'display' for meaning.
+ */
+function asn_rate_limits_server_load($server_load_limit = 3) {
+  // Get server load
+  $server_load = array_map(function($v){return round($v,2);}, sys_getloadavg());
+  // Check server load increase in last 5 minutes and above limit
+  $server_load['limit'] = $server_load_limit;
+  $server_load['critical'] = ($server_load[0] > $server_load_limit);# && ($server_load[0] > $server_load[1]);
+  // Add a nice display
+  $class = $server_load['critical'] ? 'abovelimit' : 'belowlimit';
+  $server_load['display'] = "<span class='$class'>" . $server_load[0] . ' in last minute, ' . $server_load[1] . ' last 5 minutes, ' . $server_load[2] . ' last 15 minutes, Load limit: ' . $server_load_limit . '. </span>';
+  return $server_load;
+}
+
+/**
+ * Checks to see if an IP address has been blocked.
+ *
+ * Blocked IP addresses are stored in the database only.
+ * @param $ip IP address to check.
+ *
+ * @return timestamp since when access is denied, FALSE if access is allowed.
+ */
+function asn_rate_limits_ip_is_blocked($ip) {
+
+  $denied = db_query("SELECT time FROM {blocked_ips} WHERE ip = :ip", array(':ip' => $ip))->fetchField();
+  return $denied ?? FALSE;
+}
+
+/**
+ * Implements hook_init().
+ *
+ */
+function asn_rate_limits_init() {
+  $ip = check_plain(ip_address());
+
+  // Check IP address which is not already blocked.
+  if (!ip_is_denied($ip)) {
+    $asns_blocked = state_get('asn_rate_limits');
+    // Check only if we currently block an ASN
+    if (!empty($asns_blocked)) {
+      try {
+        $db_path = backdrop_realpath('public://geoip/GeoLite2-ASN.mmdb');
+        $AsnDbReader = new \GeoIp2\Database\Reader($db_path);
+        $asn_record = $AsnDbReader->asn($ip);
+        $asn = 'AS' . $asn_record->autonomousSystemNumber;
+        if (in_array($asn, $asns_blocked)) {
+          $block_ip_reason = "Part of blocked ASN $asn.";
+          ip_blocking_block_ip($ip, $block_ip_reason, 'asn');
+          watchdog('asn_rate_limits', "Blocked IP $ip as part of $asn.");
+          header($_SERVER['SERVER_PROTOCOL'] . ' 429 Too Many Requests');
+          print 'Sorry, your IP address ' . $ip . ' has been banned due to excessive requests from your network ' . $asn . '.';
+          exit;
+        }
+      } catch (Exception $e) {
+        watchdog('asn_rate_limits', 'AsnDbReader exception: ' . $e->getMessage());
+      }
+    }
+  }
+}

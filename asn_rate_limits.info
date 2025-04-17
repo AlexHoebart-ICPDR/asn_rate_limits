@@ -1,0 +1,9 @@
+name = ASN Rate Limits
+description = Block IP and ASN (autonomous system number) when reaching defined resource limits.
+package = Spam control
+backdrop = 1.x
+type = module
+dependencies[] = ip_blocking (>=1.x-1.0.5)
+dependencies[] = statistics
+configure = admin/config/people/asn_rate_limits
+
