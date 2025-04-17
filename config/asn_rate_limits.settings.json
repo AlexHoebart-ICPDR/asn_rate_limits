@@ -1,0 +1,8 @@
+{
+    "_config_name": "asn_rate_limits.settings",
+    "time_window": "30 minutes",
+    "ips_limit": "20",
+    "hits_limit": "100",
+    "time_limit": "60",
+    "server_load_limit": "3"
+}

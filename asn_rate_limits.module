@@ -11,13 +11,34 @@ function asn_rate_limits_menu() {
   $items = array();
 
   $items['admin/config/people/asn_rate_limits'] = array(
+    'title' => 'ASN Rate Limits settings',
+    'description' => 'Configure settings for the ASN Rate Limits module.',
+    'file' => 'asn_rate_limits.admin.inc',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('asn_rate_limits_form'),
+    'access arguments' => array('administer site configuration'),
     'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/reports/asn_rate_limits'] = array(
     'title' => 'ASN Rate Limits',
-    'description' => 'Manage ASN rate limits.',
+    'description' => 'View ASN rate limits.',
     'page callback' => 'asn_rate_limits_page',
-    'access arguments' => array('antiscan settings'),
+    'access arguments' => array('view site reports'),
+    'type' => MENU_NORMAL_ITEM,
   );
   return $items;
+}
+
+/**
+ * Implements hook_config_info().
+ */
+function asn_rate_limits_config_info() {
+  $prefixes['asn_rate_limits.settings'] = array(
+    'label' => t('ASN Rate Limits Settings'),
+    'group' => t('Configuration'),
+  );
+  return $prefixes;
 }
 
 /**
@@ -59,15 +80,11 @@ function asn_rate_limits_mail($key, &$message, $params) {
  *
  */
 function asn_rate_limits_page() {
-  $time_window = '30 minutes';
-  $distinct_ips_limit = 20;
-  $hit_limit = 100;
-  $time_limit_sec = 60;
-  $server_load_limit = 3;
+  $config = config('asn_rate_limits.settings');
   $asns_blocked = state_get('asn_rate_limits');
 
   backdrop_add_css(backdrop_get_path('module', 'asn_rate_limits') . '/css/asn_rate_limits.admin.css', array('type' => 'file'));
-  if ($result = asn_rate_limits_check($time_window, $distinct_ips_limit, $hit_limit, $time_limit_sec, $server_load_limit)) {
+  if ($result = asn_rate_limits_check()) {
     $asns_sort_column  = array_column($result['asns'], 'timer');
     array_multisort($asns_sort_column, SORT_DESC, $result['asns']);
 
@@ -81,17 +98,17 @@ function asn_rate_limits_page() {
       $row[] = array('data' => $asn['organization'], 'rowspan' => count($asn['ips']));
 #      $log_link = l($asn['hits'], 'admin/reports/accesslog', array('query' => array('hostname' => implode('|', array_keys($asn['ips'])))));
       $log_link = l($asn['hits'], 'admin/reports/accesslog/' . implode('+', array_keys($asn['ips'])));
-      $row[] = array('data' => $asn['timer']/1000, 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array(($asn['timer']/1000 > $time_limit_sec) ? 'abovelimit' : 'belowlimit'));
-      $row[] = array('data' => $log_link, 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array(($asn['hits'] > $hit_limit) ? 'abovelimit' : 'belowlimit'));
-      $row[] = array('data' => count($asn['ips']), 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array((count($asn['ips']) > $distinct_ips_limit) ? 'abovelimit' : 'belowlimit'));
+      $row[] = array('data' => $asn['timer']/1000, 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array(($asn['timer']/1000 > $config->get('time_limit')) ? 'abovelimit' : 'belowlimit'));
+      $row[] = array('data' => $log_link, 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array(($asn['hits'] > $config->get('hits_limit')) ? 'abovelimit' : 'belowlimit'));
+      $row[] = array('data' => count($asn['ips']), 'rowspan' => count($asn['ips']), 'align' => 'right', 'class' => array((count($asn['ips']) > $config->get('ips_limit')) ? 'abovelimit' : 'belowlimit'));
 #      $ips_sort_column  = array_column($asn['ips'], 'blocked');
       $ips_sort_column  = array_column($asn['ips'], 'timer');
       array_multisort($ips_sort_column, SORT_DESC, $asn['ips']);
       foreach ($asn['ips'] as $ip => $ip_row) {
         $row[] = $ip;
-        $row[] = array('data' => $ip_row['timer']/1000, 'align' => 'right', 'class' => array(($ip_row['timer']/1000 > $time_limit_sec) ? 'abovelimit' : 'belowlimit'));
+        $row[] = array('data' => $ip_row['timer']/1000, 'align' => 'right', 'class' => array(($ip_row['timer']/1000 > $config->get('time_limit')) ? 'abovelimit' : 'belowlimit'));
         $log_link = l($ip_row['hits'], 'admin/reports/accesslog/' . $ip);
-        $row[] = array('data' => $log_link, 'align' => 'right', 'class' => array(($ip_row['hits'] > $hit_limit) ? 'abovelimit' : 'belowlimit'));
+        $row[] = array('data' => $log_link, 'align' => 'right', 'class' => array(($ip_row['hits'] > $config->get('hits_limit')) ? 'abovelimit' : 'belowlimit'));
         $row[] = format_date($ip_row['timestamp'], 'custom', 'H:i');
         $row[] = truncate_utf8($ip_row['path'], 30, TRUE, TRUE);
         // Print "no", "now" or date when IP was blocked
@@ -106,11 +123,11 @@ function asn_rate_limits_page() {
       backdrop_set_message('There are !ips_blocked new IPs blocked from ASNS !asns', array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
     }
 
-    $build['limits'] = array('#markup' => "<p>Defined usage limits within $time_window: $time_limit_sec seconds CPU time and $hit_limit hits, and $distinct_ips_limit IPs for ASNs. </p>");
+    $build['limits'] = array('#markup' => "<p>Defined usage limits within " . $config->get('time_window') . ": " . $config->get('time_limit') . " seconds CPU time and " . $config->get('hits_limit') . " hits, and " . $config->get('ips_limit') . " IPs for ASNs. </p>");
     $build['blocked'] = array('#markup' => "<p>Currently blocked ASN(s): " . ($asns_blocked ? implode(', ', $asns_blocked) : 'none') . "</p>");
-    $server_load = asn_rate_limits_server_load($server_load_limit);
+    $server_load = asn_rate_limits_server_load($config->get('server_load_limit'));
     $build['load'] = array('#markup' => '<p class="asn_rate_limits">Current server load: ' . $server_load['display'] . '</p>');
-    $build['info'] = array('#markup' => '<p>The table below shows a summary of the access log in the last ' . $time_window . ', grouped by ASN (autonomous system number) and IP, sorted by total time used.</p>');
+    $build['info'] = array('#markup' => '<p>The table below shows a summary of the access log in the last ' . $config->get('time_window') . ', grouped by ASN (autonomous system number) and IP, sorted by total time used.</p>');
     $build['table'] = array('#theme' => 'table', '#header' => $header, '#rows' => $rows, '#attributes' => array('class' => array('asn_rate_limits')));
     return $build;
   } else {
@@ -122,10 +139,12 @@ function asn_rate_limits_page() {
  * Check current site usage by ASN.
  *
  */
-function asn_rate_limits_check($time_window = '30 minutes', $distinct_ips_limit = 20, $hit_limit = 100, $time_limit_sec = 60, $server_load_limit = 3) {
+function asn_rate_limits_check() {
 
-  $interval_start = strtotime('- ' . $time_window);
-  $time_limit = $time_limit_sec * 1000;
+  $config = config('asn_rate_limits.settings');
+  $interval_start = strtotime('- ' . $config->get('time_window'));
+  $hit_limit = $config->get('hits_limit');
+  $time_limit = $config->get('time_limit') * 1000;
   $asns = array();
   $ips_blocked = 0;
   $asns_blocked = array();
@@ -198,18 +217,8 @@ function asn_rate_limits_check($time_window = '30 minutes', $distinct_ips_limit 
     }
 
     // Check server load increase and above limit
-    $server_load = asn_rate_limits_server_load($server_load_limit);
+    $server_load = asn_rate_limits_server_load($config->get('server_load_limit'));
 
-/*
-$test_asn = 'AS45899';
-$test_ip = '14.191.27.43';
-$test = $asns[$test_asn];
-$test['count'] = count($test['ips']);
-dsm($test['ips'][$test_ip]);
-unset($test['ips']);
-dsm($test);
-dsm("Limits: $hit_limit hits, $time_limit ms, $distinct_ips_limit IPs.");
-*/
     // Analyse summary and block if needed
     if ($server_load['critical']) {
       foreach ($asns as $asn => $asn_record) {
@@ -222,7 +231,7 @@ dsm("Limits: $hit_limit hits, $time_limit ms, $distinct_ips_limit IPs.");
               $block_ip_reason = "IP exceeds $hit_limit hits or $time_limit seconds.";
             }
             // Exceeding limits on ASN level?
-            if ($asn_record['hits'] > $hit_limit && $asn_record['timer'] > $time_limit && count($asn_record['ips']) > $distinct_ips_limit) {
+            if ($asn_record['hits'] > $hit_limit && $asn_record['timer'] > $time_limit && count($asn_record['ips']) > $config->get('ips_limit')) {
               $block_ip_reason = "Part of ASN $asn with more than $hit_limit hits or $time_limit seconds.";
               $asns_blocked[$asn] = $asn;
             }
@@ -256,7 +265,7 @@ dsm("Limits: $hit_limit hits, $time_limit ms, $distinct_ips_limit IPs.");
  *
  * @return array see key 'display' for meaning.
  */
-function asn_rate_limits_server_load($server_load_limit = 3) {
+function asn_rate_limits_server_load($server_load_limit = 1) {
   // Get server load
   $server_load = array_map(function($v){return round($v,2);}, sys_getloadavg());
   // Check server load increase in last 5 minutes and above limit
