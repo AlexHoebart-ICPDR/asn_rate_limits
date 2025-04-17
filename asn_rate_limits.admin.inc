@@ -33,9 +33,9 @@ function asn_rate_limits_form($form, &$form_state) {
     '#title' => t('Time window in which below limits apply'),
     '#default_value' => $config->get('time_window'),
     '#min' => 1,
-    '#max' => 60*3,
+    '#max' => 180,
     '#step' => 1,
-    '#attributes' => array('title' => array('values 1-100')),
+    '#attributes' => array('title' => array('values 1-180')),
     '#field_suffix' => 'minutes'
   );
 
@@ -104,7 +104,7 @@ function asn_rate_limits_form_validate($form, &$form_state) {
 function asn_rate_limits_form_submit($form, &$form_state) {
   $config = config('asn_rate_limits.settings');
 
-  $config->set('time_window', trim($form_state['values']['time_window']));
+  $config->set('time_window', (int) $form_state['values']['time_window']);
   $config->set('ips_limit', (int) $form_state['values']['ips_limit']);
   $config->set('hits_limit', (int) $form_state['values']['hits_limit']);
   $config->set('time_limit', (int) $form_state['values']['time_limit']);

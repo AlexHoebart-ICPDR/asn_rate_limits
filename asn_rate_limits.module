@@ -123,11 +123,11 @@ function asn_rate_limits_page() {
       backdrop_set_message('There are !ips_blocked new IPs blocked from ASNS !asns', array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
     }
 
-    $build['limits'] = array('#markup' => "<p>Defined usage limits within " . $config->get('time_window') . ": " . $config->get('time_limit') . " seconds CPU time and " . $config->get('hits_limit') . " hits, and " . $config->get('ips_limit') . " IPs for ASNs. </p>");
-    $build['blocked'] = array('#markup' => "<p>Currently blocked ASN(s): " . ($asns_blocked ? implode(', ', $asns_blocked) : 'none') . "</p>");
+    $build['limits'] = array('#markup' => "<p>Defined usage limits within " . $config->get('time_window') . " minutes: " . $config->get('time_limit') . " seconds CPU time and " . $config->get('hits_limit') . " hits, and " . $config->get('ips_limit') . " IPs for ASNs. </p>");
     $server_load = asn_rate_limits_server_load($config->get('server_load_limit'));
     $build['load'] = array('#markup' => '<p class="asn_rate_limits">Current server load: ' . $server_load['display'] . '</p>');
-    $build['info'] = array('#markup' => '<p>The table below shows a summary of the access log in the last ' . $config->get('time_window') . ', grouped by ASN (autonomous system number) and IP, sorted by total time used.</p>');
+    $build['blocked'] = array('#markup' => "<p>Currently blocked ASN(s): " . ($asns_blocked ? implode(', ', $asns_blocked) : 'none') . "</p>");
+    $build['info'] = array('#markup' => '<p>The table below shows a summary of the access log in the last ' . $config->get('time_window') . ' minutes, grouped by ASN (autonomous system number) and IP, sorted by total time used.</p>');
     $build['table'] = array('#theme' => 'table', '#header' => $header, '#rows' => $rows, '#attributes' => array('class' => array('asn_rate_limits')));
     return $build;
   } else {
@@ -142,7 +142,7 @@ function asn_rate_limits_page() {
 function asn_rate_limits_check() {
 
   $config = config('asn_rate_limits.settings');
-  $interval_start = strtotime('- ' . $config->get('time_window'));
+  $interval_start = time() - $config->get('time_window')*60;
   $hit_limit = $config->get('hits_limit');
   $time_limit = $config->get('time_limit') * 1000;
   $asns = array();
