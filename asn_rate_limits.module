@@ -125,6 +125,7 @@ function asn_rate_limits_page() {
 
     $build['limits'] = array('#markup' => "<p>Defined usage limits within " . $config->get('time_window') . " minutes: " . $config->get('time_limit') . " seconds CPU time and " . $config->get('hits_limit') . " hits, and " . $config->get('ips_limit') . " IPs for ASNs. </p>");
     $server_load = asn_rate_limits_server_load($config->get('server_load_limit'));
+    $build['totals'] = array('#markup' => "<p>Totals: " . $result['hits_total'] . " hits using " . format_interval($result['time_total']/1000) . " execution time.</p>");
     $build['load'] = array('#markup' => '<p class="asn_rate_limits">Current server load: ' . $server_load['display'] . '</p>');
     $build['blocked'] = array('#markup' => "<p>Currently blocked ASN(s): " . ($asns_blocked ? implode(', ', $asns_blocked) : 'none') . "</p>");
     $build['info'] = array('#markup' => '<p>The table below shows a summary of the access log in the last ' . $config->get('time_window') . ' minutes, grouped by ASN (autonomous system number) and IP, sorted by total time used.</p>');
@@ -147,6 +148,8 @@ function asn_rate_limits_check() {
   $time_limit = $config->get('time_limit') * 1000;
   $asns = array();
   $ips_blocked = 0;
+  $hits_total = 0;
+  $time_total = 0;
   $asns_blocked = array();
 
   $db_path = backdrop_realpath('public://geoip/GeoLite2-ASN.mmdb');
@@ -164,9 +167,13 @@ function asn_rate_limits_check() {
       ->condition('uid', 0)
       ->condition('timestamp', $interval_start, '>=')
       ->orderBy('aid', 'ASC')
+      ->range(0, 10000) // limit so it won't be too much to handle
       ->execute();
     if ($result) {
       while ($row = $result->fetchObject()) {
+
+        $hits_total++;
+        $time_total += $row->timer;
 
         try {
           $asn_record = $AsnDbReader->asn($row->hostname);
@@ -246,7 +253,13 @@ function asn_rate_limits_check() {
         }
       }
     }
-    $result = array('asns' => $asns, 'ips_blocked' => $ips_blocked, 'asns_blocked' => $asns_blocked);
+    $result = array(
+      'hits_total' => $hits_total,
+      'time_total' => $time_total,
+      'asns' => $asns,
+      'ips_blocked' => $ips_blocked,
+      'asns_blocked' => $asns_blocked
+    );
     return $result;
   }
   else {
