@@ -11,7 +11,7 @@ function asn_rate_limits_menu() {
   $items = array();
 
   $items['admin/config/people/asn_rate_limits'] = array(
-    'title' => 'ASN Rate Limits settings',
+    'title' => 'ASN Rate Limits',
     'description' => 'Configure settings for the ASN Rate Limits module.',
     'file' => 'asn_rate_limits.admin.inc',
     'page callback' => 'backdrop_get_form',
@@ -60,8 +60,7 @@ function asn_rate_limits_cron() {
       $language = $config->get('language_default');
       $params['subject'] = t('ASN blocked on site !site_name', array('!site_name' => $config->get('site_name')));
       $params['body'] = $message;
-      $server_load = asn_rate_limits_server_load();
-      $params['body'].= 'Current server load: ' . $server_load['display'];
+      $params['body'].= 'Current server load: ' . $result['server_load']['display'];
       backdrop_mail('asn_rate_limits', 'cron', $to, $language, $params);
     }
 
@@ -130,10 +129,9 @@ function asn_rate_limits_page() {
       backdrop_set_message('There are !ips_blocked new IPs blocked from ASNS !asns', array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
     }
 
-    $build['limits'] = array('#markup' => "<p>Defined usage limits within " . $config->get('time_window') . " minutes: " . $config->get('time_limit') . " seconds CPU time and " . $config->get('hits_limit') . " hits, and " . $config->get('ips_limit') . " IPs for ASNs. </p>");
-    $server_load = asn_rate_limits_server_load($config->get('server_load_limit'));
-    $build['totals'] = array('#markup' => "<p>Totals: " . $result['hits_total'] . " hits using " . format_interval($result['time_total']/1000) . " execution time.</p>");
-    $build['load'] = array('#markup' => '<p class="asn_rate_limits">Current server load: ' . $server_load['display'] . '</p>');
+    $build['limits'] = array('#markup' => "<p>Defined usage limits within " . $config->get('time_window') . " minutes per IP/ASN: " . $config->get('hits_limit') . " hits, " . $config->get('time_limit') . " seconds CPU time, and " . $config->get('ips_limit') . " IPs for ASNs. </p>");
+    $build['totals'] = array('#markup' => "<p>Totals: " . $result['hits_total'] . " hits using " . format_interval($result['time_total']/1000) . " CPU time.</p>");
+    $build['load'] = array('#markup' => '<p class="asn_rate_limits">Current server load: ' . $result['server_load']['display'] . '</p>');
     $build['blocked'] = array('#markup' => "<p>Currently blocked ASN(s): " . ($asns_blocked ? implode(', ', $asns_blocked) : 'none') . "</p>");
     $build['info'] = array('#markup' => '<p>The table below shows a summary of the access log in the last ' . $config->get('time_window') . ' minutes, grouped by ASN (autonomous system number) and IP, sorted by total time used.</p>');
     $build['table'] = array('#theme' => 'table', '#header' => $header, '#rows' => $rows, '#attributes' => array('class' => array('asn_rate_limits')));
@@ -263,6 +261,7 @@ function asn_rate_limits_check() {
     $result = array(
       'hits_total' => $hits_total,
       'time_total' => $time_total,
+      'server_load' => $server_load,
       'asns' => $asns,
       'ips_blocked' => $ips_blocked,
       'asns_blocked' => $asns_blocked
@@ -285,15 +284,25 @@ function asn_rate_limits_check() {
  *
  * @return array see key 'display' for meaning.
  */
-function asn_rate_limits_server_load($server_load_limit = 1) {
-  // Get server load
-  $server_load = array_map(function($v){return round($v,2);}, sys_getloadavg());
-  // Check server load increase in last 5 minutes and above limit
-  $server_load['limit'] = $server_load_limit;
-  $server_load['critical'] = ($server_load[0] > $server_load_limit);# && ($server_load[0] > $server_load[1]);
-  // Add a nice display
-  $class = $server_load['critical'] ? 'abovelimit' : 'belowlimit';
-  $server_load['display'] = "<span class='$class'>" . $server_load[0] . ' in last minute, ' . $server_load[1] . ' last 5 minutes, ' . $server_load[2] . ' last 15 minutes, Load limit: ' . $server_load_limit . '. </span>';
+function asn_rate_limits_server_load($server_load_limit = 80) {
+  if (function_exists('sys_getloadavg')) {
+    // Get number of CPUs
+    $ncpu = substr_count((string)@file_get_contents('/proc/cpuinfo'),"\nprocessor")+1;
+    // Get server load
+    $server_load = array_map(function($v,$n){return round($v/$n*100,2);}, sys_getloadavg(), array($ncpu, $ncpu, $ncpu));
+    // Check server load in last minute is above limit
+    $server_load['limit'] = $server_load_limit;
+    $server_load['critical'] = ($server_load[0] > $server_load_limit);
+    // Add a nice display
+    $class = $server_load['critical'] ? 'abovelimit' : 'belowlimit';
+    $server_load['display'] = "<span class='$class'><strong>" .
+    $server_load[0] . '% in last minute</strong>, ' .
+    $server_load[1] . '% in last 5 minutes, ' .
+    $server_load[2] . '% in last 15 minutes;
+    Load limit: ' . $server_load_limit . '%. </span>';
+  } else {
+    $server_load = array('critical' => TRUE, 'display' => 'not available, always applying limits');
+  }
   return $server_load;
 }
 

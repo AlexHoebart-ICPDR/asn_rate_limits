@@ -77,10 +77,10 @@ function asn_rate_limits_form($form, &$form_state) {
     '#title' => t('Maximum allowed current sever load'),
     '#default_value' => $config->get('server_load_limit'),
     '#min' => 1,
-    '#max' => 16,
+    '#max' => 100,
     '#step' => 1,
-    '#attributes' => array('title' => array('values 1-16')),
-    '#field_suffix' => 'cores'
+    '#attributes' => array('title' => array('values 1-100')),
+    '#field_suffix' => '%'
   );
 
   $form['email_notification'] = array(
