@@ -1,9 +1,11 @@
 {
-    "_config_name": "asn_rate_limits.settings",
-    "time_window": "30",
-    "ips_limit": "20",
-    "hits_limit": "100",
-    "time_limit": "60",
-    "server_load_limit": "3",
-    "email_notification": 1
+  "_config_name": "asn_rate_limits.settings",
+  "time_window": "30",
+  "ips_limit": "20",
+  "hits_limit": "100",
+  "time_limit": "60",
+  "server_load_limit": "3",
+  "email_notification": 1,
+  "unblock": 1,
+  "unblock_after": 604800
 }

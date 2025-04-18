@@ -47,6 +47,12 @@ function asn_rate_limits_config_info() {
  */
 function asn_rate_limits_cron() {
 
+  $config        = config('asn_rate_limits.settings');
+  $notify        = $config->get('email_notification');
+  $unblock       = $config->get('unblock');
+  $unblock_after = $config->get('unblock_after');
+  $time_expired  = time() - $unblock_after;
+
   $result = asn_rate_limits_check();
 
   if ($result['ips_blocked'] > 0) {
@@ -54,7 +60,7 @@ function asn_rate_limits_cron() {
     $message = t("There are !ips_blocked new IP(s) blocked from ASN(s) !asns.\n\n", array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
 
     // Send an email notification (if enabled in settings)
-    if (config_get('asn_rate_limits.settings', 'email_notification')) {
+    if ($notify) {
       $config = config('system.core');
       $to = $config->get('site_mail');
       $language = $config->get('language_default');
@@ -66,6 +72,11 @@ function asn_rate_limits_cron() {
 
     watchdog('asn rate limits', $message);
   }
+
+  if ($unblock) {
+    asn_rate_limits_unblock($time_expired);
+  }
+
 }
 
 /**
@@ -349,5 +360,20 @@ function asn_rate_limits_init() {
         watchdog('asn rate limits', 'AsnDbReader exception: ' . $e->getMessage(), 'error');
       }
     }
+  }
+}
+
+/**
+ * Remove blocked IP records from DB
+ * @param int $time_expired
+ */
+function asn_rate_limits_unblock($time_expired) {
+  $unblocked = db_delete('blocked_ips')
+    ->condition('type', 'asn')
+    ->condition('time', $time_expired,'<')
+    ->execute();
+
+  if ($unblocked > 0) {
+    watchdog('asn rate limits', 'Unblocked %unblocked IP(s). Blocking period expired.', array('%unblocked' => $unblocked));
   }
 }

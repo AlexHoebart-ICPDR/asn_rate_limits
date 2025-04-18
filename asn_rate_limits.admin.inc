@@ -90,19 +90,38 @@ function asn_rate_limits_form($form, &$form_state) {
     '#description' => t('Send a notification to the site email address when an ASN is blocked during an automated check in the cron run.'),
   );
 
+  $form['unblock'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Unblock blocked IPs automatically after:') . '&nbsp;',
+    '#default_value' => $config->get('unblock'),
+    '#prefix' => '<div style="display:inline-flex;align-items:center">'
+  );
+  $form['unblock_after'] = array(
+    '#type' => 'select',
+    '#options' => array(
+      900 => t('15 minutes'),
+      3600 => t('60 minutes'),
+      43200 => t('12 hours'),
+      86400 => t('24 hours'),
+      604800 => t('7 days'),
+      2592000 => t('30 days'),
+      31536000 => t('365 days'),
+    ),
+    '#default_value' => $config->get('unblock_after'),
+    '#suffix' => '</div>',
+    '#states' => array(
+      'disabled' => array(
+        ':input[name="unblock"]' => array('checked' => FALSE),
+      ),
+    ),
+  );
+
   $form['actions']['#type'] = 'actions';
   $form['actions']['submit'] = array(
     '#type' => 'submit',
     '#value' => t('Save configuration'),
   );
   return $form;
-}
-
-/**
- * Implements hook_validate().
- */
-function asn_rate_limits_form_validate($form, &$form_state) {
-  $config = config('asn_rate_limits.settings');
 }
 
 /**
@@ -116,6 +135,9 @@ function asn_rate_limits_form_submit($form, &$form_state) {
   $config->set('hits_limit', (int) $form_state['values']['hits_limit']);
   $config->set('time_limit', (int) $form_state['values']['time_limit']);
   $config->set('server_load_limit', (int) $form_state['values']['server_load_limit']);
+  $config->set('email_notification', (int) $form_state['values']['email_notification']);
+  $config->set('unblock', (int) $form_state['values']['unblock']);
+  $config->set('unblock_after', (int) $form_state['values']['unblock_after']);
 
   $config->save();
   backdrop_set_message(t('The configuration options have been saved.'));
