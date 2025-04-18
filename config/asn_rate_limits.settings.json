@@ -4,5 +4,6 @@
     "ips_limit": "20",
     "hits_limit": "100",
     "time_limit": "60",
-    "server_load_limit": "3"
+    "server_load_limit": "3",
+    "email_notification": 1
 }

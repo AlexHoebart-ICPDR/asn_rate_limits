@@ -83,6 +83,13 @@ function asn_rate_limits_form($form, &$form_state) {
     '#field_suffix' => 'cores'
   );
 
+  $form['email_notification'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Enable email notification'),
+    '#default_value' => $config->get('email_notification'),
+    '#description' => t('Send a notification to the site email address when an ASN is blocked during an automated check in the cron run.'),
+  );
+
   $form['actions']['#type'] = 'actions';
   $form['actions']['submit'] = array(
     '#type' => 'submit',

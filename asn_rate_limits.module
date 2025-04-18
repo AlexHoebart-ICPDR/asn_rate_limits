@@ -46,19 +46,26 @@ function asn_rate_limits_config_info() {
  *
  */
 function asn_rate_limits_cron() {
+
   $result = asn_rate_limits_check();
 
   if ($result['ips_blocked'] > 0) {
 
-    $config = config('system.core');
-    $to = $config->get('site_mail');
-    $language = $config->get('language_default');
-    $params['subject'] = t('ASN blocked on site !site_name', array('!site_name' => $config->get('site_name')));
-    $params['body'] = t("There are !ips_blocked new IPs blocked from ASNs !asns.\n\n", array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
-    #$params['body'].= print_r($result['asns'], true);
-    $server_load = asn_rate_limits_server_load();
-    $params['body'].= 'Current server load: ' . $server_load['display'];
-    backdrop_mail('asn_rate_limits', 'cron', $to, $language, $params);
+    $message = t("There are !ips_blocked new IP(s) blocked from ASN(s) !asns.\n\n", array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
+
+    // Send an email notification (if enabled in settings)
+    if (config_get('asn_rate_limits.settings', 'email_notification')) {
+      $config = config('system.core');
+      $to = $config->get('site_mail');
+      $language = $config->get('language_default');
+      $params['subject'] = t('ASN blocked on site !site_name', array('!site_name' => $config->get('site_name')));
+      $params['body'] = $message;
+      $server_load = asn_rate_limits_server_load();
+      $params['body'].= 'Current server load: ' . $server_load['display'];
+      backdrop_mail('asn_rate_limits', 'cron', $to, $language, $params);
+    }
+
+    watchdog('asn rate limits', $message);
   }
 }
 
@@ -247,7 +254,7 @@ function asn_rate_limits_check() {
               ip_blocking_block_ip($ip, $block_ip_reason, 'asn');
               $asns[$asn]['ips'][$ip]['blocked'] = 'now';
               $ips_blocked++;
-              watchdog('asn_rate_limits', "Blocked IP $ip");
+              watchdog('asn rate limits', "Blocked IP $ip - $block_ip_reason");
             }
           }
         }
@@ -324,13 +331,13 @@ function asn_rate_limits_init() {
         if (in_array($asn, $asns_blocked)) {
           $block_ip_reason = "Part of blocked ASN $asn.";
           ip_blocking_block_ip($ip, $block_ip_reason, 'asn');
-          watchdog('asn_rate_limits', "Blocked IP $ip as part of $asn.");
+          watchdog('asn rate limits', "Blocked IP $ip as part of $asn.");
           header($_SERVER['SERVER_PROTOCOL'] . ' 429 Too Many Requests');
           print 'Sorry, your IP address ' . $ip . ' has been banned due to excessive requests from your network ' . $asn . '.';
           exit;
         }
       } catch (Exception $e) {
-        watchdog('asn_rate_limits', 'AsnDbReader exception: ' . $e->getMessage());
+        watchdog('asn rate limits', 'AsnDbReader exception: ' . $e->getMessage(), 'error');
       }
     }
   }
