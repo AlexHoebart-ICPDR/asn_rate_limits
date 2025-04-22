@@ -98,7 +98,7 @@ function asn_rate_limits_mail($key, &$message, $params) {
  */
 function asn_rate_limits_page() {
   $config = config('asn_rate_limits.settings');
-  $asns_blocked = state_get('asn_rate_limits');
+  $asns_blocked = state_get('asn_rate_limits', array());
 
   backdrop_add_css(backdrop_get_path('module', 'asn_rate_limits') . '/css/asn_rate_limits.admin.css', array('type' => 'file'));
   if ($result = asn_rate_limits_check()) {
@@ -340,7 +340,7 @@ function asn_rate_limits_init() {
 
   // Check IP address which is not already blocked.
   if (!ip_is_denied($ip)) {
-    $asns_blocked = state_get('asn_rate_limits');
+    $asns_blocked = state_get('asn_rate_limits', array());
     // Check only if we currently block an ASN
     if (!empty($asns_blocked)) {
       try {
