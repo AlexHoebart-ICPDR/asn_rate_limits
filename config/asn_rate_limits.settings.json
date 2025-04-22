@@ -4,7 +4,7 @@
   "ips_limit": "20",
   "hits_limit": "100",
   "time_limit": "60",
-  "server_load_limit": "3",
+  "server_load_limit": "75",
   "email_notification": 1,
   "unblock": 1,
   "unblock_after": 604800
