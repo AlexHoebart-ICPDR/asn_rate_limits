@@ -47,6 +47,9 @@ function asn_rate_limits_config_info() {
  */
 function asn_rate_limits_cron() {
 
+  // Update database
+  asn_rate_limits_update_maxmind();
+
   $config        = config('asn_rate_limits.settings');
   $notify        = $config->get('email_notification');
   $unblock       = $config->get('unblock');
@@ -137,7 +140,7 @@ function asn_rate_limits_page() {
     }
 
     if ($result['ips_blocked'] > 0) {
-      backdrop_set_message('There are !ips_blocked new IPs blocked from ASNS !asns', array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked'])));
+      backdrop_set_message(t('There are !ips_blocked new IPs blocked from ASNS !asns', array('!ips_blocked' => $result['ips_blocked'], '!asns' => implode(', ', $result['asns_blocked']))));
     }
 
     $build['limits'] = array('#markup' => "<p>Defined usage limits within " . $config->get('time_window') . " minutes per IP/ASN: " . $config->get('hits_limit') . " hits, " . $config->get('time_limit') . " seconds CPU time, and " . $config->get('ips_limit') . " IPs for ASNs. </p>");
@@ -168,9 +171,9 @@ function asn_rate_limits_check() {
   $time_total = 0;
   $asns_blocked = array();
 
-  $db_path = backdrop_realpath('public://geoip/GeoLite2-ASN.mmdb');
+  $db_path = backdrop_realpath('public://asn_rate_limits/GeoLite2-ASN.mmdb');
   if (!$db_path) {
-    backdrop_set_message('GeoLite2-ASN.mmdb not available at public://geoip/', 'error');
+    backdrop_set_message(t('GeoLite2-ASN.mmdb not available at %filepath', array('%filepath' => $db_path)), 'error');
     return FALSE;
   }
 
@@ -344,7 +347,7 @@ function asn_rate_limits_init() {
     // Check only if we currently block an ASN
     if (!empty($asns_blocked)) {
       try {
-        $db_path = backdrop_realpath('public://geoip/GeoLite2-ASN.mmdb');
+        $db_path = backdrop_realpath('public://asn_rate_limits/GeoLite2-ASN.mmdb');
         $AsnDbReader = new \GeoIp2\Database\Reader($db_path);
         $asn_record = $AsnDbReader->asn($ip);
         $asn = 'AS' . $asn_record->autonomousSystemNumber;
@@ -357,7 +360,7 @@ function asn_rate_limits_init() {
           exit;
         }
       } catch (Exception $e) {
-        watchdog('asn rate limits', 'AsnDbReader exception: ' . $e->getMessage(), 'error');
+        watchdog('asn rate limits', 'AsnDbReader exception: ' . $e->getMessage(), array(), WATCHDOG_ERROR);
       }
     }
   }
@@ -375,5 +378,68 @@ function asn_rate_limits_unblock($time_expired) {
 
   if ($unblocked > 0) {
     watchdog('asn rate limits', 'Unblocked %unblocked IP(s). Blocking period expired.', array('%unblocked' => $unblocked));
+  }
+}
+
+/**
+ * Update Maxmind ASN database
+ */
+function asn_rate_limits_update_maxmind() {
+
+  // Get account info from configuration
+  $config        = config('asn_rate_limits.settings');
+  $account_id    = $config->get('maxmind_account_id');
+  $license_key   = $config->get('maxmind_license_key');
+
+  // Do nothing without defined user account.
+  if (!$account_id || !$license_key) {
+    return FALSE;
+  }
+
+  // Define file locations.
+  $directory = 'public://asn_rate_limits';
+  $destination = $directory . '/GeoLite2-ASN_latest.tar.gz';
+  $db_name = 'GeoLite2-ASN.mmdb';
+
+  // Get age of archive.
+  $file_time = filemtime(backdrop_realpath($destination));
+
+  // Initiate update if it is outdated (older than 3 days)
+  if (!$file_time || time() - $file_time > 3 * 24 * 3600) {
+
+    // Create local file directory, if not exiting.
+    file_prepare_directory($directory, FILE_CREATE_DIRECTORY | FILE_MODIFY_PERMISSIONS);
+
+    // Define remote location and authentication header.
+    $url = 'https://download.maxmind.com/geoip/databases/GeoLite2-ASN/download?suffix=tar.gz';
+    $options['headers']['Authorization'] = 'Basic ' . base64_encode($account_id . ':' . $license_key);
+
+    // Download remote file.
+    $result = backdrop_http_request($url, $options);
+
+    if (isset($result->error)) {
+      watchdog('asn db update', 'Download of database failed: ' . $result->error, [], WATCHDOG_ERROR);
+      return FALSE;
+    } else {
+      $file_obj = file_unmanaged_save_data($result->data, $destination, FILE_EXISTS_REPLACE);
+
+      // Extract database file from archive
+      if ($file_obj == $destination && file_exists(backdrop_realpath($destination))) {
+        $tar = new Archive_Tar(backdrop_realpath($destination), 'gz');
+        $list = $tar->listContent();
+        foreach ($list as $file) {
+          if (basename($file['filename']) == $db_name) {
+            $p_remove_path = str_replace(basename($file['filename']), '', $file['filename']);
+            if ($tar->extractList($file['filename'], backdrop_realpath($directory), $p_remove_path, false, false)) {
+              watchdog('asn db update', 'Database of @date extracted successfully.', ['@date' => format_date($file['mtime'], 'short')]);
+              return TRUE;
+            } else {
+              watchdog('asn db update', 'Failed to extract the database archive.', [], WATCHDOG_ERROR);
+              return FALSE;
+            }
+          }
+        }
+      }
+    }
   }
 }

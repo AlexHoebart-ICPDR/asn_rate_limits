@@ -116,6 +116,18 @@ function asn_rate_limits_form($form, &$form_state) {
     ),
   );
 
+  $form['maxmind_account_id'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Maxmind Account ID'),
+    '#default_value' => $config->get('maxmind_account_id'),
+  );
+
+  $form['maxmind_license_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Maxmind License Key'),
+    '#default_value' => $config->get('maxmind_license_key'),
+  );
+
   $form['actions']['#type'] = 'actions';
   $form['actions']['submit'] = array(
     '#type' => 'submit',
@@ -138,6 +150,8 @@ function asn_rate_limits_form_submit($form, &$form_state) {
   $config->set('email_notification', (int) $form_state['values']['email_notification']);
   $config->set('unblock', (int) $form_state['values']['unblock']);
   $config->set('unblock_after', (int) $form_state['values']['unblock_after']);
+  $config->set('maxmind_account_id', $form_state['values']['maxmind_account_id']);
+  $config->set('maxmind_license_key', $form_state['values']['maxmind_license_key']);
 
   $config->save();
   backdrop_set_message(t('The configuration options have been saved.'));

@@ -7,5 +7,7 @@
   "server_load_limit": "75",
   "email_notification": 1,
   "unblock": 1,
-  "unblock_after": 604800
+  "unblock_after": 604800,
+  "maxmind_account_id": "",
+  "maxmind_license_key": ""
 }
