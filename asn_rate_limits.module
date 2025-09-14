@@ -172,7 +172,7 @@ function asn_rate_limits_check() {
   $asns_blocked = array();
 
   $db_path = backdrop_realpath('public://asn_rate_limits/GeoLite2-ASN.mmdb');
-  if (!$db_path) {
+  if (!$db_path || !file_exists($db_path)) {
     backdrop_set_message(t('GeoLite2-ASN.mmdb not available at %filepath', array('%filepath' => $db_path)), 'error');
     return FALSE;
   }
